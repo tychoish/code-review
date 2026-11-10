@@ -12,8 +12,8 @@
 (require 'a)
 (require 'code-review-db)
 (require 'code-review-interfaces)
+(require 'code-review-auth)
 
-(defvar code-review-auth-login-marker)
 (defvar code-review-github-graphql-host)
 (declare-function code-review-github-errback "code-review-github")
 
@@ -209,9 +209,10 @@ Synchronous ghub 5.1 responses are a single (data . CONTENTS) pair."
     (setq data (cdr (assq (pop path) data))))
   data)
 
-(defun code-review-github--continue-files (res callback &optional seen)
+(defun code-review-github--continue-files (res callback &optional seen account)
   "Complete RES's files asynchronously, then invoke CALLBACK.
-SEEN bounds pagination and stops a repeated cursor.  A failed page
+SEEN bounds pagination and stops a repeated cursor.  ACCOUNT is a
+GitHub account name or PR object for token lookup.  A failed page
 keeps the fetched subset; reconciliation never clears unknown paths."
   (let* ((data (code-review-github--graphql-data res))
          (pr (a-get-in data '(repository pullRequest)))
@@ -228,7 +229,8 @@ keeps the fetched subset; reconciliation never clears unknown paths."
               (ghub-query
                code-review-github--files-query
                `((id . ,(a-get pr 'id)) (cursor . ,cursor))
-               :auth code-review-auth-login-marker
+               :auth (code-review-auth-resolve 'github code-review-github-graphql-host account)
+               :username (code-review-auth-username account)
                :host code-review-github-graphql-host
                :callback
                (lambda (answer &rest _)
@@ -245,7 +247,7 @@ keeps the fetched subset; reconciliation never clears unknown paths."
                              (a-assoc next 'nodes
                                       (append (a-get files 'nodes)
                                               (a-get next 'nodes)))))
-                      callback (cons cursor seen)))))
+                      callback (cons cursor seen) account))))
                :errorback failed)
             (error (funcall failed))))
       (funcall callback res))))
@@ -262,13 +264,14 @@ FALLBACK? selects the query without optional fields."
                         (if (numberp number) number
                           (string-to-number number)))))
     (ghub-query query nil
-                :auth code-review-auth-login-marker
+                :auth (code-review-auth-resolve 'github code-review-github-graphql-host)
+                :username (code-review-auth-username)
                 :host code-review-github-graphql-host
                 :callback (lambda (res &rest _)
-                            (code-review-github--continue-files res callback))
+                            (code-review-github--continue-files res callback nil github))
                 :errorback #'code-review-github-errback)))
 
-(defun code-review-github--fetch-connection (_github query variables path)
+(defun code-review-github--fetch-connection (github query variables path)
   "Fetch all nodes of the paginated QUERY at PATH.
 VARIABLES supplies the first page's inputs.  These completion
 queries are synchronous because callers need their return value."
@@ -279,7 +282,8 @@ queries are synchronous because callers need their return value."
                     (ghub-query query
                                 (append variables
                                         (and cursor `((cursor . ,cursor))))
-                                :auth code-review-auth-login-marker
+                                :auth (code-review-auth-resolve 'github code-review-github-graphql-host github)
+                                :username (code-review-auth-username github)
                                 :host code-review-github-graphql-host
                                 :synchronous t)))
              (connection (code-review-github--path page path))
@@ -343,7 +347,8 @@ Cache the result in raw infos as mentionable-users."
              (if viewed? "MarkFileAsViewedInput" "UnmarkFileAsViewedInput")
              (if viewed? "markFileAsViewed" "unmarkFileAsViewed"))
      `((input . ((path . ,path) (pullRequestId . ,pr-id))))
-     :auth code-review-auth-login-marker
+     :auth (code-review-auth-resolve 'github code-review-github-graphql-host github)
+     :username (code-review-auth-username github)
      :host code-review-github-graphql-host
      :callback callback :errorback errorback)))
 

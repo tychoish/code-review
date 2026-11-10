@@ -29,6 +29,7 @@
 ;;; Code:
 
 (require 'code-review-db)
+(require 'code-review-auth)
 (require 'code-review-parse-hunk)
 
 (defcustom code-review-bitbucket-host "api.bitbucket.org/2.0"
