@@ -8,7 +8,7 @@ EMACS   ?= emacs
 PKG_DIR ?= $(HOME)/.emacs.d/elpa
 LOAD_PATH := -L . -L test $(addprefix -L ,$(wildcard $(PKG_DIR)/*))
 
-DEPS = a closql magit transient ghub uuidgen deferred markdown-mode forge emojify s dash
+DEPS = a closql magit transient ghub uuidgen deferred markdown-mode emojify s dash
 
 .PHONY: deps compile test check clean
 

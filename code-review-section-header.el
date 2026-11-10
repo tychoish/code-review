@@ -285,7 +285,7 @@ survivability rule)."
               (overlay-put o 'font-lock-face
                            `((:background ,background)
                              (:foreground ,foreground)
-                             forge-topic-label)))
+                             code-review-topic-label-face)))
             (insert " "))
         (insert (propertize "None yet" 'font-lock-face 'magit-dimmed)))
       (insert ?\n))))

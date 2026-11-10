@@ -226,5 +226,10 @@
   "Face for the risk badge on delicate hunk headings (phase 15)."
   :group 'code-review)
 
+(defface code-review-topic-label-face
+  '((t (:box (:line-width (-1 . -1) :style nil))))
+  "Face used for PR topic labels in the header."
+  :group 'code-review)
+
 (provide 'code-review-faces)
 ;;; code-review-faces.el ends here
