@@ -264,8 +264,8 @@ FALLBACK? selects the query without optional fields."
                         (if (numberp number) number
                           (string-to-number number)))))
     (ghub-query query nil
-                :auth (code-review-auth-resolve 'github code-review-github-graphql-host)
-                :username (code-review-auth-username)
+                :auth (code-review-auth-resolve 'github code-review-github-graphql-host github)
+                :username (code-review-auth-username github)
                 :host code-review-github-graphql-host
                 :callback (lambda (res &rest _)
                             (code-review-github--continue-files res callback nil github))

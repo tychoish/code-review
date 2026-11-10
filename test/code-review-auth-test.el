@@ -144,6 +144,18 @@
         (should (equal (code-review-gh-pr-account pr) "dflt"))
         (should (equal (code-review-auth-resolve 'github nil pr) "gho_dflt"))))))
 
+(ert-deftest code-review-auth-test/build-obj-from-url-returns-pr-and-registers-account ()
+  "Regression: `code-review-db--pullreq-create' must return the PR object
+so `code-review-utils-build-obj' can register the selected GitHub account."
+  (require 'code-review-test-helpers)
+  (code-review-test--with-db
+    (let ((code-review-gh--pr-accounts (make-hash-table :test #'equal))
+          (code-review-gh-default-account "tycho-casap"))
+      (let ((pr (code-review-utils-build-obj-from-url
+                 "https://github.com/casaphq/go-monorepo/pull/11423")))
+        (should (code-review-github-repo-p pr))
+        (should (equal (code-review-gh-pr-account pr) "tycho-casap"))))))
+
 (ert-deftest code-review-auth-test/missing-gh ()
   (let ((code-review-auth-backend 'gh)
         (code-review-gh-token-cache (make-hash-table :test #'equal)))
@@ -210,14 +222,17 @@
     (should-error (code-review-auth-username) :type 'user-error)))
 
 (ert-deftest code-review-auth-test/every-resolve-call-site-passes-username ()
-  "Each `:auth (code-review-auth-resolve ...)' is followed by `:username'."
+  "Each `:auth (code-review-auth-resolve ...)' is followed by `:username',
+and every call in `code-review-github*' passes the PR/account object."
   (let ((dir (file-name-directory (locate-library "code-review-auth"))))
     (seq-do
      (lambda (file)
        (with-temp-buffer
          (insert-file-contents file)
          (goto-char (point-min))
-         (while (re-search-forward ":auth (code-review-auth-resolve" nil t)
+         (while (re-search-forward ":auth (code-review-auth-resolve 'github" nil t)
+           (when (string-match-p "code-review-github" (file-name-nondirectory file))
+             (should (looking-at-p " [^ \t\n)]+ \\([^ \t\n)]+\\))")))
            (forward-line 1)
            (should (looking-at-p "[ \t]*:username (code-review-auth-username")))))
      (directory-files dir t "\\`code-review-.*\\.el\\'"))))
