@@ -35,9 +35,10 @@
 (require 'code-review-db)
 (require 'a)
 
-(defclass code-review-github-repo (code-review-db-pullreq)
-  ()
-  "A GitHub pull request.")
+(eval-and-compile
+  (defclass code-review-github-repo (code-review-db-pullreq)
+    ()
+    "A GitHub pull request."))
 
 (require 'code-review-github-query)
 
