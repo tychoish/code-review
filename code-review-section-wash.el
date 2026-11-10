@@ -59,8 +59,6 @@
 
 ;; files report
 
-(defclass code-review-files-report-section (magit-section)
-  (()))
 ;; phase 13 (render-time value owned by code-review-section.el):
 ;; the new-since-last-review alist, NIL forward-declaration — a
 ;; valued defvar here would pre-bind it and shadow the owner

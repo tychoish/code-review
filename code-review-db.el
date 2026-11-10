@@ -534,7 +534,8 @@ for the same review."
       (setq code-review-db--pullreq-id pr-id)
       (dolist (row viewed)
         (code-review-db--reviewed-insert
-         (plist-get row :path) (plist-get row :hunk-key))))))
+         (plist-get row :path) (plist-get row :hunk-key))))
+    obj))
 
 (defun code-review-db--pullreq-sha-update (sha-value)
   "Update pullreq obj of ID with value SHA-VALUE."

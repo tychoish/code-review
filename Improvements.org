@@ -4,6 +4,25 @@ Goal: make reviewing AI-generated PRs from Emacs practical. See the
 *important* changes early, keep noise away, and review inside real
 repository context (xref, tests, running code).
 
+* Installation load order
+
+The files report section class lives in =code-review-section-shared.el=:
+it must be defined before =code-review-viewed.el= loads, because
+=cl-typep= expands during source loading.
+
+* GitHub CLI authentication
+
+GitHub can now use =gh auth token= for auth, with support for multiple
+accounts.  Set =code-review-gh-default-account= or select a buffer-local
+account with =code-review-gh-select-account=; review startup prompts if
+needed.  The CLI's active account is unchanged.  Accounts are retained
+per PR for asynchronous requests, and tokens are cached per host and
+account. =code-review-auth-clear-cache= clears the cache;
+authentication failures evict the affected token when known.  Set
+=code-review-auth-backend= to =auth-source= or a custom resolver to use
+another backend.  GitLab and Bitbucket continue to use the auth-source
+marker.
+
 * Phase 1 — Local repo context                                  :STATUS:done
 
 The mode has no notion of "the PR's repository on disk".  Visiting a

@@ -44,10 +44,10 @@
 (require 'dash)
 
 (require 'code-review-utils)
+(require 'code-review-auth)
 
 ;; forward-declared VALUELESS: the owning files' defcustoms install
 ;; their defaults; a valued defvar here would swallow them
-(defvar code-review-auth-login-marker)
 (defvar code-review-github-graphql-host)
 
 (defcustom code-review-people-cache-file
@@ -169,7 +169,8 @@ CALLBACK receives (nodes next-cursor) or nil on error."
     }"
    `((org . ,org)
      ,@(and cursor `((cursor . ,cursor))))
-   :auth code-review-auth-login-marker
+   :auth (code-review-auth-resolve 'github code-review-github-graphql-host)
+   :username (code-review-auth-username)
    :host code-review-github-graphql-host
    :callback
    (lambda (response)

@@ -44,6 +44,10 @@
 (require 'shr)
 (require 'dom)
 
+(defclass code-review-files-report-section (magit-section)
+  ()
+  "Section for the files changed report.")
+
 
 
 

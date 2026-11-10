@@ -49,12 +49,12 @@
 (require 'tabulated-list)
 
 (require 'code-review-utils)
+(require 'code-review-auth)
 (require 'code-review-people)
 (require 'code-review-repo)
 
 ;; forward-declared VALUELESS: the owning files' defcustoms install
 ;; their defaults; a valued defvar here would swallow them
-(defvar code-review-auth-login-marker)
 (defvar code-review-github-host)
 
 (defcustom code-review-search-authors nil
@@ -86,10 +86,13 @@ The most frequent committers of the project clones win."
 ;;; The query (pure)
 
 (defun code-review-search--window-start (days as-of)
-  "The created:>= date DAYS before AS-OF, as YYYY-MM-DD."
+  "The created:>= date DAYS before AS-OF, as YYYY-MM-DD in UTC.
+GitHub evaluates search dates in UTC, so the window must not shift
+with the local time zone."
   (format-time-string
    "%Y-%m-%d"
-   (time-subtract as-of (days-to-time days))))
+   (time-subtract as-of (days-to-time days))
+   t))
 
 (defun code-review-search--query (org author &optional days as-of)
   "The search qualifier string for ORG and AUTHOR.
@@ -136,7 +139,8 @@ created inside the rolling DAYS window (default
      (sort . "created")
      (order . "desc")
      (per_page . ,(number-to-string code-review-search-per-page)))
-   :auth code-review-auth-login-marker
+   :auth (code-review-auth-resolve 'github code-review-github-host)
+   :username (code-review-auth-username)
    :host code-review-github-host
    :callback
    (lambda (response)
