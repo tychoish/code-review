@@ -29,6 +29,7 @@
 ;;; Code:
 
 (require 'a)
+(require 'code-review-auth)
 (require 'dash)
 (require 'magit-git)
 (require 'forge-pullreq)
@@ -335,11 +336,13 @@ slot would serialize its entire property payload into the db
   (let-alist  pr-alist
     (cond
      ((equal .forge 'github)
-      (code-review-db--pullreq-create
-       (code-review-github-repo :owner .owner
-                                :repo .repo
-                                :number .num
-                                :url .url)))
+      (let ((pr (code-review-db--pullreq-create
+                 (code-review-github-repo :owner .owner
+                                          :repo .repo
+                                          :number .num
+                                          :url .url))))
+        (code-review-gh-register-pr-account pr (code-review-gh-ensure-account))
+        pr))
      ((equal .forge 'gitlab)
       (code-review-db--pullreq-create
        (code-review-gitlab-repo :owner .owner

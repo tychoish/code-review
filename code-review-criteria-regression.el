@@ -53,10 +53,10 @@
 (require 'cl-lib)
 (require 'magit-section)
 (require 'code-review-utils)
+(require 'code-review-auth)
 (require 'code-review-criteria)
 (require 'code-review-registry)
 (defvar code-review-repo-worktree)         ; code-review-repo.el
-(defvar code-review-auth-login-marker)     ; code-review-github.el
 (defvar code-review-github-host)           ; code-review-github.el
 (declare-function code-review-db-local-pr-p "code-review-db")
 (declare-function code-review-db-get-pullreq "code-review-db")
@@ -227,7 +227,8 @@ CONTRIBUTOR decides; the reviewer never targets main."
         (let* ((res (ghub-post
                      (format "/repos/%s/%s/pulls" owner repo)
                      nil
-                     :auth code-review-auth-login-marker
+                     :auth (code-review-auth-resolve 'github code-review-github-host pr)
+                     :username (code-review-auth-username pr)
                      :payload (code-review-criteria-regression--pr-payload
                                criterion branch pr-branch)
                      :headers '(("Accept" . "application/vnd.github.v3+json"))

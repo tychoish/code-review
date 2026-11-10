@@ -54,10 +54,12 @@ FILE nil means: just drop the singleton."
 
 (defmacro code-review-test--with-db (&rest body)
   "Run BODY with a fresh, isolated test database.
-Cleans up (connection, singleton, sqlite file) when done."
+Cleans up (connection, singleton, sqlite file) when done.  Tests that
+stub ghub use the `auth-source' backend so no `gh' account is needed."
   (declare (indent 0))
   (let ((file (make-symbol "file")))
-    `(let ((,file (code-review-test--fresh-db-file)))
+    `(let ((,file (code-review-test--fresh-db-file))
+           (code-review-auth-backend 'auth-source))
        (code-review-test--reset-db ,file)
        (unwind-protect
            (progn ,@body)

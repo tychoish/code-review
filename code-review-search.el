@@ -49,12 +49,12 @@
 (require 'tabulated-list)
 
 (require 'code-review-utils)
+(require 'code-review-auth)
 (require 'code-review-people)
 (require 'code-review-repo)
 
 ;; forward-declared VALUELESS: the owning files' defcustoms install
 ;; their defaults; a valued defvar here would swallow them
-(defvar code-review-auth-login-marker)
 (defvar code-review-github-host)
 
 (defcustom code-review-search-authors nil
@@ -139,7 +139,8 @@ created inside the rolling DAYS window (default
      (sort . "created")
      (order . "desc")
      (per_page . ,(number-to-string code-review-search-per-page)))
-   :auth code-review-auth-login-marker
+   :auth (code-review-auth-resolve 'github code-review-github-host)
+   :username (code-review-auth-username)
    :host code-review-github-host
    :callback
    (lambda (response)

@@ -55,6 +55,7 @@ bodyHTML."
 (ert-deftest code-review-github-test/req-2026-10-16-003-viewed-state-all-pages ()
   "WHEN a change has many files THE SYSTEM SHALL reconcile review progress beyond the first page."
   (let ((original (symbol-function 'ghub-query))
+        (code-review-auth-backend 'auth-source)
         (code-review-auth-login-marker 'test)
         (calls 0)
         result)
@@ -96,6 +97,7 @@ bodyHTML."
 (ert-deftest code-review-github-test/viewed-page-error-keeps-fetched-subset ()
   "A continuation error preserves fetched states rather than clearing unseen files."
   (let ((original (symbol-function 'ghub-query))
+        (code-review-auth-backend 'auth-source)
         (code-review-auth-login-marker 'test)
         (response (code-review-github-test--files-response
                    '(((path . "first.el") (viewerViewedState . "VIEWED")))
@@ -114,6 +116,7 @@ bodyHTML."
 (ert-deftest code-review-github-test/viewed-page-repeated-cursor-stops ()
   "Pagination cannot loop forever if the server repeats a cursor."
   (let* ((original (symbol-function 'ghub-query))
+         (code-review-auth-backend 'auth-source)
          (code-review-auth-login-marker 'test)
          (response (code-review-github-test--files-response nil t "same"))
          (calls 0)
@@ -143,6 +146,7 @@ bodyHTML."
       (should (string-match-p "pageInfo" query))
       (should-not (string-match-p "viewedEdges\\|;;\\|%s" query))))
   (let ((original (symbol-function 'ghub-query))
+        (code-review-auth-backend 'auth-source)
         (code-review-auth-login-marker 'test)
         (pr (code-review-github-repo :owner "owner" :repo "repo" :number 42))
         calls)

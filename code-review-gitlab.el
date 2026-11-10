@@ -31,6 +31,7 @@
 (require 'dash)
 (require 'let-alist)
 (require 'code-review-db)
+(require 'code-review-auth)
 (require 'code-review-parse-hunk)
 (require 'code-review-interfaces)
 (require 'code-review-utils)
