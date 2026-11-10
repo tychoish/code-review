@@ -32,10 +32,6 @@
 (require 'code-review-auth)
 (require 'dash)
 (require 'magit-git)
-(require 'forge-pullreq)
-(require 'forge-post)
-(require 'forge-core)
-(require 'forge-github)
 
 (defcustom code-review-github-base-url "github.com"
   "Host used to identify PR URLs from Github."
@@ -396,33 +392,6 @@ Return a value between 0 and 1."
   "Calculate the luminance of color composed of RED, GREEN and BLUE.
 Return a value between 0 and 1."
   (/ (+ (* .2126 red) (* .7152 green) (* .0722 blue)) 256))
-
-
-;;; Forge interface
-
-(defun code-review-utils--alist-forge-at-point ()
-  "Start from forge at point."
-  (let* ((pullreq (or (forge-pullreq-at-point) (forge-current-topic)))
-         (repo    (forge-get-repository pullreq))
-         (number (oref pullreq number)))
-    (if (not (forge-pullreq-p pullreq))
-        (message "We can only review PRs at the moment. You tried on something else.")
-      (a-alist 'owner   (oref repo owner)
-               'repo    (oref repo name)
-               'num     (cond
-                         ((numberp number)
-                          (number-to-string number))
-                         ((stringp number)
-                          number)
-                         (t
-                          (error "Pull Request has unrecognizable number value")))
-               'forge (cond
-                       ((forge-github-repository-p repo)
-                        'github)
-                       ((forge-gitlab-repository-p repo)
-                        'gitlab)
-                       (t
-                        (error "Backend not supported!")))))))
 
 ;;; LOG
 
