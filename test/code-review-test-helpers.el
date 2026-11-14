@@ -22,6 +22,9 @@
 (require 'ert)
 (require 'code-review-db)
 
+;; Render tests assert synchronous content
+(setq-default code-review-analysis-deferred? nil)
+
 (defun code-review-test--fresh-db-file ()
   "Return a unique temporary sqlite file name."
   (format "/tmp/code-review-test-db-%s.sqlite" (uuidgen-4)))

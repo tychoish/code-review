@@ -48,13 +48,15 @@
          (executable (expand-file-name invocation-name invocation-directory))
          (paths (-mapcat (lambda (dir) (list "-L" dir))
                          (-filter #'stringp load-path))))
-    (--each '(nil browse-url forge)
+    (--each (-filter (lambda (pkg) (or (null pkg) (locate-library (symbol-name pkg))))
+                     '(nil browse-url forge))
       (let* ((program
               `(progn
                  ,@(when it `((require ',it)))
                  (load ,autoload-file nil t)
                  (require 'browse-url)
-                 (require 'forge)
+                 (when (locate-library "forge")
+                   (require 'forge))
                  (unless (eq (cdar browse-url-default-handlers) 'code-review-browse-url)
                    (error "PR handler lost precedence"))))
              (args (append
