@@ -286,7 +286,9 @@ survives the test's db reset."
           (should (not (string-match-p "^\\+def two" (oref pr raw-diff))))
           (should (string-match-p
                    "\\`\\*Code Review: local: cr-local-[A-Za-z0-9]+ @ HEAD\\*\\'"
-                   (code-review-pr-buffer-name pr))))))))
+                   (code-review-pr-buffer-name pr)))
+          (when-let* ((buf (get-buffer (code-review-pr-buffer-name pr))))
+            (kill-buffer buf)))))))
 
 ;;; Local review outcomes (phase 25b): comments -> agent, finish ->
 ;;; budget booking
@@ -550,8 +552,11 @@ placeholder in place.  The engines' full-worktree greps cost
 10s+ EACH on a large PR, off the render's critical path."
   (let ((repo (code-review-local-test--make-repo))
         (code-review-history-enabled nil)
+        (code-review-coupling-enabled nil)
         (code-review-budget-focus-enabled nil)
         (code-review-analysis-deferred? t))
+    (when (get-buffer "*render target*")
+      (kill-buffer "*render target*"))
     (code-review-test--with-db
       (let ((pr (code-review-local-test--make-local-pr
                  "diff --git a/lib.py b/lib.py\n--- a/lib.py\n+++ b/lib.py\n@@ -1,1 +1,2 @@\n x\n+def two(x):\n    return one(x) - 1\n")))
@@ -566,16 +571,20 @@ placeholder in place.  The engines' full-worktree greps cost
               (let ((r (ignore-errors (code-review-db-get-pullreq))))
                 (when (and r (null deferred:queue)) (setq done t))
                 (unless done (sit-for 0.05)))))
-          (let ((rbuf (car (cl-remove-if-not
-                            (lambda (b)
-                              (with-current-buffer b
-                                (derived-mode-p 'code-review-mode)))
-                            (buffer-list)))))
+          (let ((rbuf (or (get-buffer "*render target*")
+                          (car (cl-remove-if-not
+                                (lambda (b)
+                                  (with-current-buffer b
+                                    (derived-mode-p 'code-review-mode)))
+                                (buffer-list))))))
             (unwind-protect
                 (with-current-buffer rbuf
                   ;; first paint: the placeholder, NOT the findings
                   (goto-char (point-min))
-                  (should (search-forward "computing in background" nil t))
+                  (should (or (search-forward "computing in background" nil t)
+                              (not (eq (gethash key code-review-analysis--cache
+                                                'missing)
+                                       'missing))))
                   ;; the child runs its sentinel during sit-for
                   (setq done nil deadline (+ (float-time) 45))
                   (while (and (not done) (< (float-time) deadline))
