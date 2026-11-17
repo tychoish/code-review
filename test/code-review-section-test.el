@@ -296,7 +296,7 @@ badge.  The analysis run is faked: the wash only READS its result
     (with-temp-buffer
       (let ((inhibit-read-only t))
         (code-review-section-insert-is-draft))
-      (should (string-match-p "Draft: +false" (buffer-string)))))
+      (should (string-match-p "Draft: +false" (buffer-string))))))
 
 (ert-deftest code-review-section-test/labels ()
   "Labels render each name; missing labels show the placeholder."
@@ -308,9 +308,13 @@ badge.  The analysis run is faked: the wash only READS its result
       (let ((inhibit-read-only t))
         (magit-insert-section (code-review--root-section)
           (code-review-section-insert-labels)))
+      ;; magit-insert-heading auto-appends the child count
       (should (string-match-p "Labels: +bug" (buffer-string)))
       (should (= 1 (length (overlays-in (point-min) (point-max))))))
     ;; no labels at all: the dimmed placeholder
+    (let ((pr (code-review-db-get-pullreq)))
+      (oset pr labels nil)
+      (closql-insert (code-review-db) pr t))
     (with-temp-buffer
       (let ((inhibit-read-only t))
         (code-review-section-insert-labels))
@@ -389,9 +393,9 @@ badge.  The analysis run is faked: the wash only READS its result
                                     (url . "https://example.com/bob")))))
        (latestOpinionatedReviews
         (nodes ((author (login . "alice")
-                        (url . "https://example.com/alice")
-                        (state . "APPROVED")
-                        (createdAt . "2021-11-08T00:24:09Z")))))))
+                        (url . "https://example.com/alice"))
+                (state . "APPROVED")
+                (createdAt . "2021-11-08T00:24:09Z"))))))
     (with-temp-buffer
       (magit-section-mode)
       (let ((inhibit-read-only t))
@@ -443,13 +447,14 @@ badge.  The analysis run is faked: the wash only READS its result
   (code-review-section-test--with-section-env
     (code-review-db--pullreq-raw-infos-update
      `((commits (nodes ((commit (abbreviatedOid . "abc1234")
-                                (message . "plain subject"))))))))
+                                (message . "plain subject")))))))
     (with-temp-buffer
       (magit-section-mode)
       (let ((inhibit-read-only t))
         (magit-insert-section (code-review--root-section)
           (code-review-section-insert-commits)))
-      (should (string-match-p "Commits:" (buffer-string)))
+      ;; magit-insert-heading auto-appends the child count
+      (should (string-match-p "Commits (1)" (buffer-string)))
       (should (string-match-p "abc1234 plain subject" (buffer-string)))
       (should-not (string-match-p "CI Checks" (buffer-string)))
       (let ((types (code-review-section-test--section-types)))
@@ -881,5 +886,67 @@ and the Files changed heading reports 2/2 viewed."
           (beginning-of-line)
           (should (eq (get-text-property (point) 'font-lock-face)
                       'code-review-dimmed)))))))
+
+;;; req-2026-11-09-010: in-place send-marking, no full re-render
+;; covers: code-review-section.el
+;; covers-fn: code-review-section--mark-comment-sent-in-place
+;; covers-fn: code-review-section--mark-local-comments-sent
+;; enforcement: test
+(ert-deftest code-review-section-test/mark-local-comments-sent-in-place ()
+  "WHEN a review or a comment is submitted THE SYSTEM SHALL flip the
+\"by YOU\" local headings to the sent style IN PLACE: section start
+markers stay valid, text properties (the heading face and magit's
+section identity) ride over, and body text merely QUOTING the
+heading is never touched."
+  (code-review-section-test--with-section-env
+    (with-temp-buffer
+      (magit-section-mode)
+      (let* ((inhibit-read-only t)
+             (obj (code-review-local-comment-section
+                   :msg "looks good" :path "a.el" :author "me"
+                   :state "PENDING" :line-type "ADDED"))
+             (reply (code-review-reply-comment-section
+                     :msg "sure" :path "a.el" :author "me"
+                     :state "PENDING")))
+        (magit-insert-section (code-review--root-section)
+          (magit-insert-section (code-review-local-comment-section obj)
+            (code-review-comment-insert-lines obj))
+          (magit-insert-section (code-review-reply-comment-section reply)
+            (code-review-comment-insert-lines reply))
+          ;; a decoy: a comment BODY quoting the heading text
+          (magit-insert-section (code-review-comment-section)
+            (insert "someone wrote: Comment by YOU: inside\n")))
+        (let ((marked (code-review-section--mark-local-comments-sent
+                       (buffer-name))))
+          ;; exactly the two live sections rewritten
+          (should (= marked 2))
+          (goto-char (point-min))
+          (should (search-forward "You, just now: " nil t))
+          (should (search-forward "Reply, just now: " nil t))
+          (goto-char (point-min))
+          ;; the decoy body text is untouched
+          (should (search-forward "someone wrote: Comment by YOU: inside"
+                                  nil t))
+          ;; no pending heading survives
+          (should-not (re-search-forward
+                       (code-review-section--by-you-heading-regexp)
+                       nil t))
+          ;; every section's start marker still points AT its new
+          ;; heading line (markers may legitimately shift by the
+          ;; length delta of sections edited ABOVE them)
+          (dolist (s (--filter
+                      (memq (oref it type)
+                            '(code-review-local-comment-section
+                              code-review-reply-comment-section))
+                      (--mapcat (cons it (oref it children))
+                                (oref magit-root-section children))))
+            (should (save-excursion
+                      (goto-char (marker-position (oref s start)))
+                      (or (looking-at-p "You, just now: ")
+                          (looking-at-p "Reply, just now: ")))))
+          ;; the heading keeps its face through the surgery
+          (goto-char (point-min))
+          (re-search-forward "You, just now: " nil t)
+          (should (get-text-property (match-beginning 0) 'face)))))))
 
 ;;; code-review-section-test.el ends here
