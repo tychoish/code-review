@@ -233,4 +233,13 @@ blocked by a dangling empty branch."
                     dir "rev-parse" "--abbrev-ref" "HEAD"))
                   "review/req-2026-10-10-002")))))
 
+(ert-deftest code-review-criteria-regression-test/worktree-resolves-diff-review ()
+  "code-review-agents-shell--worktree recognizes active diff-review buffers."
+  (with-temp-buffer
+    (setq-local diff-review--root "/tmp/test-diff-review-wt/")
+    (cl-letf (((symbol-function 'diff-review--review-buffer)
+               (lambda () (current-buffer))))
+      (should (equal (code-review-agents-shell--worktree)
+                     "/tmp/test-diff-review-wt/")))))
+
 ;;; code-review-criteria-regression-test.el ends here

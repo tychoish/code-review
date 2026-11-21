@@ -57,16 +57,24 @@
 (declare-function agent-shell--shell-buffer "agent-shell")
 (declare-function agent-shell--read-shell-buffer "agent-shell")
 
+(defvar diff-review--root)
+(declare-function diff-review--review-buffer "diff-review")
+
 (defun code-review-agents-shell--worktree ()
   "The directory the drafter's agent should work in.
 The review buffer's worktree (a detached checkout at the PR head
 for forge PRs — the agent can trash it freely), the repository
 root when no review is open, else the directory of the criterion
 file itself."
-  (let ((fallback (and (fboundp 'code-review-registry--repo-dir)
-                       (code-review-registry--repo-dir))))
+  (let* ((diff-review-buf (and (fboundp 'diff-review--review-buffer)
+                              (diff-review--review-buffer)))
+         (diff-review-root (and diff-review-buf
+                                (buffer-local-value 'diff-review--root diff-review-buf)))
+         (fallback (and (fboundp 'code-review-registry--repo-dir)
+                        (code-review-registry--repo-dir))))
     (file-name-as-directory
      (or (bound-and-true-p code-review-repo-worktree)
+         (and diff-review-root (not (string-empty-p diff-review-root)) diff-review-root)
          (and fallback (not (string-empty-p fallback)) fallback)
          default-directory))))
 
