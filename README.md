@@ -392,6 +392,23 @@ after a submit is the caller's job (`set-verdict` with nil).
 Same stability contract, lookup and `:dry-run` semantics as the comment
 API.
 
+## Send API
+
+`code-review-api-submit` publishes a review, replies, resolutions and
+edits without a review buffer; `code-review-api-reconcile` lists what
+GitHub already has.  See the Commentary of `code-review-api-send.el`.
+Stability notes:
+
+- The result carries `:remote-ids` (REST integer ids) and `:node-ids`
+  (alist of ITEM-ID . GraphQL node id: the review as `review`,
+  comments, replies, resolved threads; edits have none).
+- `code-review-api-reconcile` reviews and comments carry `:node-id` and
+  `:user` (the author's login string).
+- `:on-item` DETAIL is now always a plist starting with `:node-id`
+  (nil when unknown), followed by the former failure/skip plist; for a
+  sent item it was nil before.  `plist-get` readers are unaffected;
+  test OUTCOME, not DETAIL, to tell sent from failed/skipped.
+
 # Extension to other forges
 
 The package allows you to write integration with other forges to leverage these
