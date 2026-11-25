@@ -168,3 +168,57 @@ bodyHTML."
       (fset 'ghub-query original))))
 
 ;;; code-review-github-test.el ends here
+
+(defun code-review-github-test--wait (flag-fn)
+  "Pump timers and processes until FLAG-FN returns non-nil or 3s pass."
+  (let ((deadline (+ (float-time) 3)))
+    (while (and (not (funcall flag-fn)) (< (float-time) deadline))
+      (accept-process-output nil 0.02))))
+
+(ert-deftest code-review-github-test/send-replies-waits-for-responses ()
+  "The callback runs after the replies are answered, with their ids."
+  (let ((orig (symbol-function 'ghub-post))
+        (pending nil)
+        (result 'unset)
+        (code-review-auth-backend (lambda (&rest _) "tok"))
+        (pr (code-review-github-repo :owner "o" :repo "r" :number 1))
+        (replies (code-review-submit-github-replies)))
+    (unwind-protect
+        (progn
+          (fset 'ghub-post
+                (lambda (_url _params &rest args)
+                  (push (plist-get args :callback) pending)))
+          (oset replies pr pr)
+          (oset replies replies
+                (list (code-review-submit-reply :reply-to-id 1 :body "a" :internal-id "x")))
+          (code-review-send-replies replies (lambda (ids) (setq result ids)))
+          (code-review-github-test--wait (lambda () pending))
+          (sit-for 0.1)
+          (should (eq result 'unset))
+          (funcall (car pending) '((id . 42)))
+          (code-review-github-test--wait (lambda () (not (eq result 'unset))))
+          (should (equal result '(42))))
+      (fset 'ghub-post orig))))
+
+(ert-deftest code-review-github-test/send-replies-resolves-when-errback-signals ()
+  "A signaling errback must not leave the callback waiting forever."
+  (let ((orig (symbol-function 'ghub-post))
+        (orig-errback (symbol-function 'code-review-github-errback))
+        (result 'unset)
+        (code-review-auth-backend (lambda (&rest _) "tok"))
+        (pr (code-review-github-repo :owner "o" :repo "r" :number 1))
+        (replies (code-review-submit-github-replies)))
+    (unwind-protect
+        (progn
+          (fset 'code-review-github-errback (lambda (&rest _) (error "boom")))
+          (fset 'ghub-post
+                (lambda (_url _params &rest args)
+                  (funcall (plist-get args :errorback) '(error http 500 nil) nil nil nil)))
+          (oset replies pr pr)
+          (oset replies replies
+                (list (code-review-submit-reply :reply-to-id 1 :body "a" :internal-id "x")))
+          (code-review-send-replies replies (lambda (ids) (setq result ids)))
+          (code-review-github-test--wait (lambda () (not (eq result 'unset))))
+          (should (equal result '(nil))))
+      (fset 'ghub-post orig)
+      (fset 'code-review-github-errback orig-errback))))
