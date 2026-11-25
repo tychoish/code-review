@@ -526,7 +526,8 @@ for the same review."
     (when same-review
       (oset obj raw-diff (oref previous raw-diff))
       (oset obj raw-infos (oref previous raw-infos))
-      (oset obj raw-comments (oref previous raw-comments)))
+      (oset obj raw-comments (oref previous raw-comments))
+      (oset obj review (oref previous review)))
     (closql-with-transaction db
       (dolist (row rows)
         (code-review-db--delete-pullreq-tree db (car row)))
