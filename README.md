@@ -325,6 +325,73 @@ prefer to move between comments instead, rebind the jump commands:
 (define-key code-review-mode-map (kbd "M-p") 'code-review-comment-jump-previous)
 ```
 
+# Comment data API
+
+`code-review-api.el` is a buffer-less, non-interactive API over the
+comments stored on a PR's db record, for external front-ends (for
+example a JSON interchange adapter).
+
+``` emacs-lisp
+(code-review-api-comments "owner/repo" 7)
+(code-review-api-upsert-comment "owner/repo" 7
+  '(:path "a.el" :line 5 :side "RIGHT" :body "text" :author "me") :dry-run nil)
+(code-review-api-delete-comment "owner/repo" 7 ID :dry-run nil)
+```
+
+A comment is a plist with the keys `:id` (integer), `:remote-id`,
+`:path`, `:line`, `:lines` (`(START END)` for a range), `:side`, `:body`,
+`:author`, `:at`, `:status` (`draft`, `pending` or `sent`), `:reply-to`
+and `:resolved`.
+
+Stability contract:
+
+- The three functions and the plist keys are public.  Keys may be
+  added; they are never removed or re-typed.
+- `:id` is stable across reads.  Forge comments use their numeric
+  databaseId; local drafts use ids in [2^44, 2^53) (other caller ids are
+  rejected).  Pass `:id` on upsert to be idempotent: without it each call
+  mints a new draft.  Ids are unique
+  per (repo, number), not across hosts or accounts.
+- Only local drafts are mutable.  Editing or deleting a sent or
+  pending forge comment signals `user-error`; a sent comment's remote
+  fields are never altered.
+- A PR that is not in the db: reads return nil, writes signal
+  `user-error` (no record is created; open the PR first).  A new draft
+  needs a `:path` and a string `:body`.
+- Drafts are stored in the existing `raw-comments` format (plus an
+  `api-id` key), so the review buffer renders them.
+- Concurrency is last-writer-wins; an open review buffer does not see
+  an API change until it is rebuilt.
+- `:reply-to` must be the databaseId of a forge comment in the PR; the
+  reply inherits its path and hunk.  On update, `:author`, `:remote-id`,
+  `:resolved`, `:status` and `:at` are ignored; `:lines nil` collapses a
+  range.  `:resolved` is read from the stored thread metadata.
+- `:dry-run t` on upsert/delete writes inside a transaction, validates
+  by reading back, rolls back, and returns the would-be result.
+
+## Verdict API
+
+``` emacs-lisp
+(code-review-api-verdict "owner/repo" 7)
+(code-review-api-set-verdict "owner/repo" 7 'changes "HEAD-OID" :dry-run nil)
+(code-review-api-set-verdict "owner/repo" 7 nil)   ; clear
+(code-review-api-verdict-stale-p "owner/repo" 7 "CURRENT-HEAD-OID")
+```
+
+The pending verdict is a plist `(:state STATE :head-oid OID :at TIMESTAMP)`
+(or nil): `STATE` is `approved`, `changes` or `comment`; `:head-oid` is
+the head commit it was made on (may be nil) and `:at` is a UTC ISO
+timestamp.  Unknown states signal `user-error`; so does a PR that is not
+in the db.  The verdict is stored in the pullreq record's `review` slot
+(unused before; no schema change or migration) and survives reopening
+the same PR.  `code-review-api-verdict-stale-p` is non-nil when a
+verdict with a head oid exists and differs from the given head.  The
+review buffer's State line shows `(pending verdict: STATE)`.  The
+interactive submit commands do not read the verdict, and clearing it
+after a submit is the caller's job (`set-verdict` with nil).
+Same stability contract, lookup and `:dry-run` semantics as the comment
+API.
+
 # Extension to other forges
 
 The package allows you to write integration with other forges to leverage these

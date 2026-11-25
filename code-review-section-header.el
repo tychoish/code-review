@@ -214,6 +214,10 @@ survivability rule)."
     (let ((value (if state state "none")))
       (magit-insert-section (code-review-state-section value)
         (insert (format "%-17s" "State: ") value)
+        (when-let* ((verdict (oref (code-review-db-get-pullreq) review))
+                    (verdict-state (plist-get verdict :state)))
+          (insert (propertize (format "  (pending verdict: %s)" verdict-state)
+                              'font-lock-face 'magit-dimmed)))
         (insert ?\n)))))
 (defclass code-review-ref-section (magit-section)
   ((base   :initarg :base
