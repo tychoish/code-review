@@ -466,4 +466,99 @@
       (should (equal (plist-get (car (plist-get res :comments)) :path) "a.el"))
       (should-not (plist-get res :errors)))))
 
+;; Node ids (GraphQL ids) alongside the REST ids.
+
+(ert-deftest code-review-api-send-test/node-ids-review-and-comments ()
+  (code-review-api-send-test--with-stubs
+    (setq code-review-api-send-test--responder
+          (lambda (_k _t _p) '((id . 900) (node_id . "PRR_900"))))
+    (setq code-review-api-send-test--get-responder
+          (lambda (_k target _p)
+            (if (string-match-p "/reviews/900/comments" target)
+                '(((id . 71) (node_id . "PRRC_71") (path . "b.el") (line . 4) (body . "two"))
+                  ((id . 70) (node_id . "PRRC_70") (path . "a.el") (line . 3) (body . "one")))
+              `((head . ((sha . ,code-review-api-send-test--head)))))))
+    (let* ((seen nil)
+           (res (code-review-api-submit
+                 "o/r" 7 :event "COMMENT" :head-oid "aaa111"
+                 :on-item (lambda (id _outcome _remote detail)
+                            (push (cons id (plist-get detail :node-id)) seen))
+                 :comments '((:id "c1" :path "a.el" :body "one" :line 3)
+                             (:id "c2" :path "b.el" :body "two" :line 4)))))
+      (should (equal (plist-get res :node-ids)
+                     '((review . "PRR_900") ("c1" . "PRRC_70") ("c2" . "PRRC_71"))))
+      (should (equal (plist-get res :remote-ids)
+                     '((review . 900) ("c1" . 70) ("c2" . 71))))
+      (should (equal (nreverse seen)
+                     '((review . "PRR_900") ("c1" . "PRRC_70") ("c2" . "PRRC_71")))))))
+
+(ert-deftest code-review-api-send-test/node-ids-individual-comments-and-replies ()
+  (code-review-api-send-test--with-stubs
+    (setq code-review-api-send-test--responder
+          (lambda (_k target _p)
+            (cond
+             ((string-match-p "/comments/11/replies" target) '((id . 801) (node_id . "PRRC_801")))
+             ((string-match-p "/comments/12/replies" target) '((id . 802) (node_id . "PRRC_802")))
+             ((string-match-p "/pulls/7/comments\\'" target) '((id . 501) (node_id . "PRRC_501")))
+             (t '((id . 802) (node_id . "PRRC_802"))))))
+    (let ((res (code-review-api-submit
+                "o/r" 7 :head-oid "aaa111"
+                :comments '((:id "c1" :path "a.el" :body "one" :line 3))
+                :replies '((:id "r1" :reply-to-id 11 :body "x")
+                           (:id "r2" :reply-to-id 12 :body "y")))))
+      (should (equal (plist-get res :node-ids)
+                     '(("c1" . "PRRC_501") ("r1" . "PRRC_801") ("r2" . "PRRC_802")))))))
+
+(ert-deftest code-review-api-send-test/node-ids-resolve-and-edit ()
+  (code-review-api-send-test--with-stubs
+    (let ((res (code-review-api-submit
+                "o/r" 7 :head-oid "aaa111"
+                :resolve '((:id "t1" :thread-id "PRRT_1" :resolved t))
+                :edits '((:id "e1" :kind "review-comment" :comment-id 5 :body "b")))))
+      (should (equal (plist-get res :sent) '("t1" "e1")))
+      (should (equal (plist-get res :node-ids) '(("t1" . "PRRT_1")))))))
+
+(ert-deftest code-review-api-send-test/node-ids-absent-when-response-has-none ()
+  (code-review-api-send-test--with-stubs
+    (let* ((details nil)
+           (res (code-review-api-submit
+                 "o/r" 7 :head-oid "aaa111"
+                 :on-item (lambda (_id outcome _remote detail)
+                            (push (cons outcome detail) details))
+                 :replies '((:id "r1" :reply-to-id 11 :body "x")
+                            (:id "r2" :reply-to-id 12 :body "y" :remote-id 9)))))
+      (should-not (plist-get res :node-ids))
+      (should (equal (nreverse details)
+                     '((sent :node-id nil)
+                       (skipped :node-id nil :id "r2" :reason already-sent)))))))
+
+(ert-deftest code-review-api-send-test/on-item-failed-detail-keeps-fields ()
+  (code-review-api-send-test--with-stubs
+    (let ((detail nil))
+      (setq code-review-api-send-test--responder (lambda (_k _t _p) (list :fail 422 nil)))
+      (code-review-api-submit
+       "o/r" 7 :head-oid "aaa111"
+       :on-item (lambda (_id _outcome _remote d) (setq detail d))
+       :replies '((:id "r1" :reply-to-id 11 :body "x")))
+      (should (null (plist-get detail :node-id)))
+      (should (eq (car detail) :node-id))
+      (should (equal (plist-get detail :id) "r1"))
+      (should (equal (plist-get detail :status) 422)))))
+
+(ert-deftest code-review-api-send-test/reconcile-node-ids-and-user ()
+  (code-review-api-send-test--with-stubs
+    (setq code-review-api-send-test--get-responder
+          (lambda (_k target _p)
+            (if (string-match-p "/reviews\\'" target)
+                '(((id . 1) (node_id . "PRR_1") (state . "APPROVED") (user . ((login . "me")))))
+              '(((id . 2) (node_id . "PRRC_2") (path . "a.el") (user . ((login . "you")))
+                 (body . "c"))))))
+    (let* ((res (code-review-api-reconcile "o/r" 7 :account "me"))
+           (r (car (plist-get res :reviews)))
+           (c (car (plist-get res :comments))))
+      (should (equal (plist-get r :node-id) "PRR_1"))
+      (should (equal (plist-get r :user) "me"))
+      (should (equal (plist-get c :node-id) "PRRC_2"))
+      (should (equal (plist-get c :user) "you")))))
+
 ;;; code-review-api-send-test.el ends here

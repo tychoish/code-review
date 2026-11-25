@@ -67,6 +67,29 @@
 ;; `:on-item' (ID OUTCOME REMOTE-ID DETAIL) runs as soon as each item's
 ;; outcome (sent, failed or skipped) is known, so callers can checkpoint
 ;; immediately; its errors are demoted and never abort the send.
+;;
+;; Node ids.  GitHub has two id spaces: the REST integer id (REMOTE-ID,
+;; `:remote-ids') and the GraphQL node id (a string such as PRRC_... or
+;; PRR_...), which is what GraphQL-based syncs key on.  The REST
+;; responses carry both; `:node-ids' of the result is an alist
+;; (ID . NODE-ID) next to `:remote-ids', filled for the review (ID
+;; `review'), each comment (from the fetch of the review's comments, or
+;; the create response), each reply and each resolve (the :thread-id
+;; itself).  Edits get none: the update endpoints' callback carries no
+;; response.  An item without a known node id is absent from the alist.
+;;
+;; Stability notes (changes that keep older callers working).
+;; - The result plist gained `:node-ids'; keys are only ever added.
+;; - `:on-item' DETAIL used to be nil for a sent item and the failure or
+;;   skip plist otherwise.  It is now ALWAYS a plist whose first key is
+;;   `:node-id' (nil when unknown), followed by the former contents:
+;;   (:node-id N) for sent, (:node-id nil :id .. :kind .. :error ..) for
+;;   failed, (:node-id nil :id .. :reason ..) for skipped.  Code that
+;;   reads DETAIL with `plist-get' is unaffected; code that tested DETAIL
+;;   for non-nil to detect failure or skip must test OUTCOME instead.
+;; - `code-review-api-reconcile' reviews and comments gained `:node-id'
+;;   (the response `node_id'); `:user' (the author's login string, nil
+;;   when GitHub reports no user, e.g. a deleted account) is documented.
 
 ;;; Code:
 
@@ -271,19 +294,22 @@ ACCOUNT, when given, is registered for it."
         (code-review-gh-register-pr-account pr account))
       pr)))
 
-(defun code-review-api-send--record (acc outcome id &optional remote detail)
+(defun code-review-api-send--record (acc outcome id &optional remote detail node)
   "Record OUTCOME (sent, failed or skipped) of item ID in ACC and call :on-item.
-REMOTE is the remote id, DETAIL the failure or skip plist."
+REMOTE is the remote id, DETAIL the failure or skip plist and NODE the
+GraphQL node id.  :on-item gets DETAIL with `:node-id' NODE prepended."
   (pcase outcome
     ('sent
      (aset acc 0 (cons id (aref acc 0)))
      (when remote
-       (aset acc 3 (cons (cons id remote) (aref acc 3)))))
+       (aset acc 3 (cons (cons id remote) (aref acc 3))))
+     (when node
+       (aset acc 6 (cons (cons id node) (aref acc 6)))))
     ('failed (aset acc 1 (cons detail (aref acc 1))))
     ('skipped (aset acc 2 (cons detail (aref acc 2)))))
   (when-let* ((callback (aref acc 4)))
     (with-demoted-errors "code-review-api-send :on-item: %S"
-      (funcall callback id outcome remote detail))))
+      (funcall callback id outcome remote (cons :node-id (cons node detail))))))
 
 (defun code-review-api-send--fail (acc id kind result idempotent-p)
   "Record item ID of KIND as failed in ACC from the error RESULT.
@@ -307,15 +333,25 @@ A non-4xx failure of a non-idempotent request is :maybe-accepted and not
               ((integerp id)))
     id))
 
+(defun code-review-api-send--node-id (value)
+  "Return the string `node_id' of the response VALUE, or nil."
+  (when-let* ((id (ignore-errors (and (consp value) (map-elt value 'node_id))))
+              ((stringp id)))
+    id))
+
 (defun code-review-api-send--items (acc kind items &rest spec)
   "Send each of ITEMS (plists) of KIND, recording outcomes in ACC.
 SPEC is a plist: :check (item -> error string or nil), :skip (item ->
 reason or nil), :send (item callback -> request), :match (item -> URL
-fragment) and :idempotent."
+fragment), :node (item response -> node id; default the response's
+`node_id') and :idempotent."
   (let ((check (plist-get spec :check))
         (skip (plist-get spec :skip))
         (send (plist-get spec :send))
         (match (plist-get spec :match))
+        (node (or (plist-get spec :node)
+                  (lambda (_item response)
+                    (code-review-api-send--node-id response))))
         (idempotent (plist-get spec :idempotent)))
     (seq-do
      (lambda (item)
@@ -336,7 +372,8 @@ fragment) and :idempotent."
                           (funcall match item))))
              (if (eq (car result) :ok)
                  (code-review-api-send--record
-                  acc 'sent id (code-review-api-send--remote-id (cadr result)))
+                  acc 'sent id (code-review-api-send--remote-id (cadr result)) nil
+                  (funcall node item (cadr result)))
                (code-review-api-send--fail acc id kind result idempotent)))))))
      items)))
 
@@ -397,6 +434,7 @@ KIND is `review' or `comment'."
   (seq-map
    (lambda (e)
      (append (list :id (map-elt e 'id)
+                   :node-id (map-elt e 'node_id)
                    :commit-id (map-elt e 'commit_id)
                    :body (map-elt e 'body)
                    :user (map-nested-elt e '(user login)))
@@ -412,10 +450,12 @@ KIND is `review' or `comment'."
 (cl-defun code-review-api-reconcile (repo number &key account)
   "List what GitHub PR NUMBER of REPO already has, to detect a posted item.
 Call this before resending anything that failed with :maybe-accepted.
-Return (:reviews R :comments C :errors E): R are plists (:id :commit-id
-:body :user :state), C plists (:id :commit-id :body :user :path :line
-:in-reply-to-id :review-id), E strings for lookups that failed.  Match
-an item by commit id and body.  ACCOUNT names the GitHub account."
+Return (:reviews R :comments C :errors E): R are plists (:id :node-id
+:commit-id :body :user :state), C plists (:id :node-id :commit-id :body
+:user :path :line :in-reply-to-id :review-id), E strings for lookups
+that failed.  :id is the REST integer id, :node-id the GraphQL id (nil
+when absent) and :user the author's login string (nil without one).
+Match an item by commit id and body.  ACCOUNT names the GitHub account."
   (let* ((pr (code-review-api-send--make-pr repo number account))
          (base (format "/repos/%s/%s/pulls/%s" (oref pr owner) (oref pr repo) number))
          (reviews (code-review-api-send--get pr (concat base "/reviews")))
@@ -441,13 +481,17 @@ the Commentary).  HEAD-OID is the commit the review was made at; it is
 required for APPROVE and REQUEST_CHANGES, which are refused (`user-error',
 nothing sent) when it differs from the PR head now or the head cannot be
 fetched.  ACCOUNT names the GitHub account: always pass it.  ON-ITEM is
-called (ID OUTCOME REMOTE-ID DETAIL) as each outcome becomes known.
+called (ID OUTCOME REMOTE-ID DETAIL) as each outcome becomes known;
+DETAIL is a plist (:node-id NODE-ID-OR-NIL ...) followed by the failure
+or skip plist, if any (see the Commentary).
 
 One failing item never aborts the others.  Return a plist:
   :sent        ids of items sent (`review' for the review itself)
   :failed      plists (:id :kind :error :status :retryable :maybe-accepted)
   :skipped     plists (:id :reason) for items already sent or empty
   :remote-ids  alist (ID . REMOTE-ID) (the review's, replies', comments')
+  :node-ids    alist (ID . NODE-ID), GraphQL node ids, same ids as
+               :remote-ids plus resolved threads (their :thread-id)
   :warnings    strings (head or comment-id lookups that failed)
   :event, :head the event sent and the commit it was attached to (nil
                when it could not be determined)."
@@ -462,7 +506,7 @@ One failing item never aborts the others.  Return a plist:
     (when (and (equal event "REQUEST_CHANGES") (code-review-api-send--blank-p body))
       (user-error "REQUEST_CHANGES needs a review body"))
     (let* ((pr (code-review-api-send--make-pr repo number account))
-           (acc (make-vector 6 nil))
+           (acc (make-vector 7 nil))
            (review-event (or event (and (not (code-review-api-send--blank-p body)) "COMMENT")))
            (fresh (seq-remove (lambda (c)
                                 (or (not (code-review-api-send--blank-p (plist-get c :remote-id)))
@@ -511,7 +555,8 @@ One failing item never aborts the others.  Return a plist:
                                               (oref pr owner) (oref pr repo) number review-id))))
                        (pairs (when (eq (car fetched) :ok)
                                 (code-review-api-send--pair-comments fresh (cadr fetched)))))
-                  (code-review-api-send--record acc 'sent 'review review-id)
+                  (code-review-api-send--record acc 'sent 'review review-id nil
+                                                (code-review-api-send--node-id (cadr result)))
                   (when (and fresh (not (eq (car fetched) :ok)))
                     (aset acc 5 (cons (format "comment remote ids unavailable (%s)"
                                               (or (plist-get (cdr fetched) :error) "no review id"))
@@ -519,7 +564,8 @@ One failing item never aborts the others.  Return a plist:
                   (seq-do (lambda (c)
                             (code-review-api-send--record
                              acc 'sent (plist-get c :id)
-                             (map-elt (alist-get c pairs nil nil #'eq) 'id)))
+                             (map-elt (alist-get c pairs nil nil #'eq) 'id) nil
+                             (map-elt (alist-get c pairs nil nil #'eq) 'node_id)))
                           fresh))
               (seq-do (lambda (c)
                         (code-review-api-send--fail acc (plist-get c :id) 'comment result nil))
@@ -579,7 +625,8 @@ One failing item never aborts the others.  Return a plist:
                  (code-review-send-replies
                   obj
                   (lambda (&optional created)
-                    (funcall callback (list (cons 'id (car-safe created)))))))))
+                    (funcall callback (list (cons 'id (car-safe created))
+                                            (cons 'node_id (car-safe (oref obj node-ids))))))))))
 
       ;; 3. Thread resolution; idempotent, so a 5xx is retried.
       (code-review-api-send--items
@@ -593,6 +640,8 @@ One failing item never aborts the others.  Return a plist:
                 (when (code-review-api-send--blank-p (plist-get r :thread-id))
                   "resolve has no :thread-id"))
        :match (lambda (_) "graphql")
+       :node (lambda (r _response)
+               (plist-get r :thread-id))
        :send (lambda (r callback)
                (code-review-toggle-resolved pr (plist-get r :thread-id)
                                             (and (plist-get r :resolved) t) callback))
@@ -617,6 +666,7 @@ One failing item never aborts the others.  Return a plist:
             :failed (nreverse (aref acc 1))
             :skipped (nreverse (aref acc 2))
             :remote-ids (nreverse (aref acc 3))
+            :node-ids (nreverse (aref acc 6))
             :warnings (nreverse (aref acc 5))
             :event review-event
             :head (oref pr sha)))))

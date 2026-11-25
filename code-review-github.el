@@ -434,15 +434,19 @@ Optionally ask for the FALLBACK? query."
    (replies :initform nil
             :type (satisfies
                    (lambda (it)
-                     (-all-p #'code-review-submit-reply-p it))))))
+                     (-all-p #'code-review-submit-reply-p it))))
+   (node-ids :initform nil
+             :documentation "Set by `code-review-send-replies' before its callback runs: GraphQL node ids of the created replies, parallel to the ids it passes (nil for a failed reply).")))
 
 (cl-defmethod code-review-send-replies ((replies code-review-submit-github-replies) callback)
   "Submit replies to review comments inline given REPLIES and a CALLBACK fn.
 CALLBACK runs once every reply request has finished (answered or failed),
 not when the requests are merely dispatched.  It is called with one
 argument, the list of created comment ids (nil for a reply that failed);
-callers that do not care can accept `&rest _'."
-  (let ((pr (oref replies pr)))
+callers that do not care can accept `&rest _'.  Before CALLBACK runs the
+`node-ids' slot of REPLIES holds the GraphQL node ids, in the same order."
+  (let ((pr (oref replies pr))
+        (nodes nil))
     (deferred:$
       (deferred:parallel
         (-map
@@ -462,6 +466,8 @@ callers that do not care can accept `&rest _'."
                               :username (code-review-auth-username pr)
                               :host code-review-github-host
                               :callback (lambda (&optional value &rest _)
+                                          (push (cons reply (ignore-errors (a-get value 'node_id)))
+                                                nodes)
                                           (deferred:callback
                                             done
                                             (or (ignore-errors (a-get value 'id)) t)))
@@ -480,6 +486,10 @@ callers that do not care can accept `&rest _'."
 
       (deferred:nextc it
         (lambda (results)
+          (oset replies node-ids
+                (-map (lambda (reply)
+                        (alist-get reply nodes nil nil #'eq))
+                      (oref replies replies)))
           (funcall callback (-map (lambda (r) (and (integerp r) r)) results))))
 
       (deferred:error it
