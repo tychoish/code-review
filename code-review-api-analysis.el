@@ -97,6 +97,7 @@ Unlike `code-review-db-search' the row need not be saved."
     (when (file-exists-p (expand-file-name ".git" wt))
       wt)))
 
+;;;###autoload
 (defun code-review-api-analysis-available-p (repo number)
   "Non-nil when the worktree engines can run for PR NUMBER of REPO.
 That is: the PR and its diff are stored and an existing review

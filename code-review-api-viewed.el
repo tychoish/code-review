@@ -86,6 +86,7 @@ The newest row wins, saved or not: the viewed marks follow the row."
         (car row)
       (user-error "No stored review for %s#%s" repo number))))
 
+;;;###autoload
 (defun code-review-api-viewed (repo number)
   "Return the viewed state of every file in REPO's pull request NUMBER.
 REPO is \"owner/name\".  The result is a list of (PATH :blob BLOB
@@ -104,6 +105,7 @@ Signals `user-error' when no review is stored for REPO and NUMBER."
              (code-review-api-viewed--blobs
               (or (code-review-db--pullreq-raw-diff) "")))))
 
+;;;###autoload
 (defun code-review-api-set-viewed (repo number path blob viewed-p)
   "Mark PATH of REPO's pull request NUMBER viewed (VIEWED-P) or unviewed.
 BLOB is the new-side blob hash the caller saw.  When non-nil it must
