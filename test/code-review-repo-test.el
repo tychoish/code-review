@@ -156,5 +156,100 @@ guard must always fall back to the fetch."
                          (code-review-repo-name dir))))
       (delete-directory dir t))))
 
+;;; worktree resolver hook
+(defun code-review-repo-test--commit (dir text)
+  "Commit TEXT as f.txt in DIR; return the new HEAD."
+  (with-temp-file (expand-file-name "f.txt" dir)
+    (insert text))
+  (code-review-repo-test--git dir "add" "f.txt")
+  (code-review-repo-test--git dir "-c" "user.name=t" "-c" "user.email=t@t"
+                              "commit" "-m" text "--no-verify")
+  (code-review-repo--git dir "rev-parse" "HEAD"))
+
+(defun code-review-repo-test--messages (thunk)
+  "Call THUNK, return (VALUE . MESSAGES-STRING)."
+  (let* ((msgs nil)
+         (val (cl-letf* ((orig (symbol-function 'message))
+                         ((symbol-function 'message)
+                          (lambda (&rest args)
+                            (push (apply #'format-message args) msgs))))
+                (ignore orig)
+                (funcall thunk))))
+    (cons val (mapconcat #'identity (nreverse msgs) "\n"))))
+
+(ert-deftest code-review-repo/worktree-resolver-used-when-matching ()
+  "A matching resolved worktree wins, gets REPO/NUMBER, and is untouched."
+  (let* ((dir (code-review-repo-test--make-repo))
+         (head (code-review-repo--git dir "rev-parse" "HEAD"))
+         (other (expand-file-name "resolved" (make-temp-file "cr-res-" t)))
+         (seen nil)
+         (code-review-worktree-resolver
+          (lambda (repo number) (setq seen (list repo number)) other)))
+    (code-review-repo-test--git dir "worktree" "add" "--detach" other head)
+    (with-temp-file (expand-file-name "dirty.txt" other) (insert "x"))
+    (unwind-protect
+        (progn
+          (should (equal (directory-file-name other)
+                         (code-review-repo--ensure-worktree dir "7" head)))
+          (should (equal (list dir 7) seen))
+          (should (equal head (code-review-repo--git other "rev-parse" "HEAD")))
+          (should (file-exists-p (expand-file-name "dirty.txt" other)))
+          (should-not (file-exists-p (code-review-repo--worktree-dir dir "7"))))
+      (delete-directory dir t)
+      (delete-directory (file-name-directory other) t))))
+
+(ert-deftest code-review-repo/worktree-resolver-falls-back ()
+  "nil, a non-directory, or a signalling resolver fall back to the own worktree."
+  (let* ((dir (code-review-repo-test--make-repo))
+         (head (code-review-repo--git dir "rev-parse" "HEAD"))
+         (own (code-review-repo--worktree-dir dir "8"))
+         (msgs nil))
+    (unwind-protect
+        (seq-do
+         (lambda (resolver)
+           (let* ((code-review-worktree-resolver resolver)
+                  (r (code-review-repo-test--messages
+                      (lambda () (code-review-repo--ensure-worktree dir "8" head)))))
+             (should (equal own (car r)))
+             (push (cdr r) msgs)
+             (should (file-exists-p (expand-file-name ".git" own)))
+             (code-review-repo--git dir "worktree" "remove" "--force" own)))
+         (list (lambda (_r _n) nil)
+               (lambda (_r _n) "/nonexistent/cr-resolver-dir")
+               (lambda (_r _n) (error "boom"))))
+      (delete-directory dir t))
+    (should (string-match-p "resolver failed: boom" (car msgs)))))
+
+(ert-deftest code-review-repo/worktree-resolver-rejects-wrong-commit ()
+  "A resolved worktree at another commit than HEAD-OID falls back."
+  (let* ((dir (code-review-repo-test--make-repo))
+         (head (code-review-repo--git dir "rev-parse" "HEAD"))
+         (other (expand-file-name "resolved" (make-temp-file "cr-res-" t)))
+         (code-review-worktree-resolver (lambda (_r _n) other)))
+    (code-review-repo-test--git dir "worktree" "add" "--detach" other head)
+    (let ((new (code-review-repo-test--commit dir "two")))
+      (unwind-protect
+          (let ((r (code-review-repo-test--messages
+                    (lambda () (code-review-repo--ensure-worktree dir "9" new)))))
+            (should (equal (code-review-repo--worktree-dir dir "9") (car r)))
+            (should (string-match-p "is not at" (cdr r)))
+            (should (equal head (code-review-repo--git other "rev-parse" "HEAD"))))
+        (delete-directory dir t)
+        (delete-directory (file-name-directory other) t)))))
+
+(ert-deftest code-review-repo/worktree-resolver-rejects-other-repo ()
+  "A resolved directory from a different repository falls back."
+  (let* ((dir (code-review-repo-test--make-repo))
+         (foreign (code-review-repo-test--make-repo))
+         (head (code-review-repo--git dir "rev-parse" "HEAD"))
+         (code-review-worktree-resolver (lambda (_r _n) foreign)))
+    (unwind-protect
+        (let ((r (code-review-repo-test--messages
+                  (lambda () (code-review-repo--ensure-worktree dir "10" head)))))
+          (should (equal (code-review-repo--worktree-dir dir "10") (car r)))
+          (should (string-match-p "is not a worktree of" (cdr r))))
+      (delete-directory dir t)
+      (delete-directory foreign t))))
+
 (provide 'code-review-repo-test)
 ;;; code-review-repo-test.el ends here

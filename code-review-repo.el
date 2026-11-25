@@ -62,6 +62,20 @@ Example: \"~/src\"."
                  (list :tag "Directories"))
   :group 'code-review-repo)
 
+(defcustom code-review-worktree-resolver nil
+  "Function locating an existing worktree for a reviewed PR, or nil.
+Called as (funcall FN REPO NUMBER) with REPO the local repository
+directory and NUMBER the PR number (an integer).  It should return an
+existing directory, or nil.  The directory is used as the review
+worktree, untouched (never reset or checked out), only when it is a
+worktree of the same repository (same `git rev-parse --git-common-dir')
+with the PR head commit checked out; relative paths are expanded
+against REPO.  When it returns nil or a non-directory, fails either
+check (a message says why), or signals, `code-review-repo' creates
+its own worktree under the git directory."
+  :type '(choice (const :tag "None" nil) function)
+  :group 'code-review-repo)
+
 (defcustom code-review-repo-clone-confirm t
   "When non-nil, ask before cloning a repository on demand."
   :type 'boolean
@@ -265,11 +279,50 @@ pollutes the working tree and survives `git clean'."
                           gitdir
                         (expand-file-name gitdir repo-dir)))))
 
+(defun code-review-repo--common-dir (dir)
+  "Return the true absolute git common directory of DIR, or nil."
+  (when-let* ((out (code-review-repo--git dir "rev-parse" "--git-common-dir")))
+    (directory-file-name
+     (file-truename (expand-file-name out (file-name-as-directory dir))))))
+
+(defun code-review-repo--resolve-worktree (repo-dir num head-oid)
+  "Ask `code-review-worktree-resolver' for a worktree of PR NUM in REPO-DIR.
+Return the directory (expanded against REPO-DIR, no trailing slash)
+only when it exists, is a worktree of the same repository and has
+HEAD-OID checked out.  Return nil, with a message giving the reason,
+otherwise; also when there is no resolver or it signals."
+  (when (and code-review-worktree-resolver head-oid)
+    (condition-case err
+        (let* ((res (funcall code-review-worktree-resolver
+                             repo-dir (if (stringp num) (string-to-number num) num)))
+               (dir (and (stringp res)
+                         (directory-file-name (expand-file-name res repo-dir)))))
+          (cond
+           ((not (and dir (file-directory-p dir))) nil)
+           ((not (equal (code-review-repo--common-dir dir)
+                        (code-review-repo--common-dir repo-dir)))
+            (message "code-review: worktree resolver result %s is not a worktree of %s"
+                     dir repo-dir)
+            nil)
+           ((not (equal (code-review-repo--git dir "rev-parse" "HEAD") head-oid))
+            (message "code-review: worktree resolver result %s is not at %s"
+                     dir head-oid)
+            nil)
+           (t dir)))
+      (error
+       (message "code-review: worktree resolver failed: %s"
+                (error-message-string err))
+       nil))))
+
 (defun code-review-repo--ensure-worktree (repo-dir num head-oid)
   "Return a worktree of REPO-DIR checked out at HEAD-OID, or nil.
-The worktree is hard-updated when the PR head moved."
-  (let ((wt (code-review-repo--worktree-dir repo-dir num)))
+The worktree is hard-updated when the PR head moved.
+A directory returned by `code-review-worktree-resolver' wins and
+is used untouched."
+  (let ((wt (code-review-repo--worktree-dir repo-dir num))
+        (resolved (code-review-repo--resolve-worktree repo-dir num head-oid)))
     (cond
+     (resolved resolved)
      ;; existing worktree: update to the current PR head
      ((and (file-exists-p (expand-file-name ".git" wt)) head-oid)
       (ignore (code-review-repo--git wt "reset" "--hard"))
