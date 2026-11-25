@@ -68,9 +68,16 @@ Clear the whole cache when no request or token can be found."
         (code-review-auth-evict-token token)
       (code-review-auth-clear-cache))))
 
+(defvar code-review-github-error-functions nil
+  "Abnormal hook run with the ghub errorback argument list on a failed request.
+Non-interactive callers (`code-review-api-send') use it to capture the
+failure of the request they are waiting on.")
+
 (defun code-review-github-errback (&rest m)
   "Error callback, displays the error message M."
   (code-review-utils--log "code-review-github-errback" (prin1-to-string m))
+  (with-demoted-errors "code-review-github-error-functions: %S"
+    (run-hook-with-args 'code-review-github-error-functions m))
   (if-let* ((first (car m))
             ((listp first))
             ((eq (car-safe first) 'errors))
@@ -429,31 +436,50 @@ Optionally ask for the FALLBACK? query."
                      (-all-p #'code-review-submit-reply-p it))))))
 
 (cl-defmethod code-review-send-replies ((replies code-review-submit-github-replies) callback)
-  "Submit replies to review comments inline given REPLIES and a CALLBACK fn."
+  "Submit replies to review comments inline given REPLIES and a CALLBACK fn.
+CALLBACK runs once every reply request has finished (answered or failed),
+not when the requests are merely dispatched.  It is called with one
+argument, the list of created comment ids (nil for a reply that failed);
+callers that do not care can accept `&rest _'."
   (let ((pr (oref replies pr)))
     (deferred:$
       (deferred:parallel
         (-map
          (lambda (reply)
            (lambda ()
-             (ghub-post (format "/repos/%s/%s/pulls/%s/comments/%s/replies"
-                                (oref pr owner)
-                                (oref pr repo)
-                                (oref pr number)
-                                (oref reply reply-to-id))
-                        nil
-                        :payload (a-alist 'body (oref reply body))
-                        :headers code-review-github-diffheader
-                        :auth (code-review-auth-resolve 'github code-review-github-host pr)
-                        :username (code-review-auth-username pr)
-                        :host code-review-github-host
-                        :callback (lambda (&rest _))
-                        :errorback #'code-review-github-errback)))
+             (let ((done (deferred:new)))
+               (condition-case err
+                   (ghub-post (format "/repos/%s/%s/pulls/%s/comments/%s/replies"
+                                      (oref pr owner)
+                                      (oref pr repo)
+                                      (oref pr number)
+                                      (oref reply reply-to-id))
+                              nil
+                              :payload (a-alist 'body (oref reply body))
+                              :headers code-review-github-diffheader
+                              :auth (code-review-auth-resolve 'github code-review-github-host pr)
+                              :username (code-review-auth-username pr)
+                              :host code-review-github-host
+                              :callback (lambda (&optional value &rest _)
+                                          (deferred:callback
+                                            done
+                                            (or (ignore-errors (a-get value 'id)) t)))
+                              :errorback (lambda (&rest m)
+                                           (unwind-protect
+                                               (with-demoted-errors "code-review reply errback: %S"
+                                                 (apply #'code-review-github-errback m))
+                                             (deferred:callback done nil))))
+                 (error
+                  (with-demoted-errors "code-review reply error hook: %S"
+                    (run-hook-with-args 'code-review-github-error-functions
+                                        (list (list 'error 'local (error-message-string err)))))
+                  (deferred:callback done nil)))
+               done)))
          (oref replies replies)))
 
       (deferred:nextc it
-        (lambda (_x)
-          (funcall callback)))
+        (lambda (results)
+          (funcall callback (-map (lambda (r) (and (integerp r) r)) results))))
 
       (deferred:error it
         (lambda (err)
