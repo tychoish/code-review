@@ -7,6 +7,12 @@
 (require 'ert)
 (require 'code-review-github)
 
+(ert-deftest code-review-github-test/errback-422-without-message ()
+  "A 422 response without a body is still reported safely."
+  (let ((code-review-github-error-functions nil))
+    (should (equal (code-review-github-errback '(error http 422 nil) nil nil nil)
+                   "Errors: \"\""))))
+
 (ert-deftest code-review-github-test/update-comment-endpoint-review-comment ()
   "Diff comments go to the review comment PATCH endpoint."
   (should (equal (code-review-github--update-comment-endpoint

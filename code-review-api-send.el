@@ -308,8 +308,9 @@ GraphQL node id.  :on-item gets DETAIL with `:node-id' NODE prepended."
     ('failed (aset acc 1 (cons detail (aref acc 1))))
     ('skipped (aset acc 2 (cons detail (aref acc 2)))))
   (when-let* ((callback (aref acc 4)))
-    (with-demoted-errors "code-review-api-send :on-item: %S"
-      (funcall callback id outcome remote (cons :node-id (cons node detail))))))
+    (condition-case err
+        (funcall callback id outcome remote (cons :node-id (cons node detail)))
+      (error (message "code-review-api-send :on-item: %S" err)))))
 
 (defun code-review-api-send--fail (acc id kind result idempotent-p)
   "Record item ID of KIND as failed in ACC from the error RESULT.
