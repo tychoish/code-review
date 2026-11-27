@@ -392,6 +392,20 @@ after a submit is the caller's job (`set-verdict` with nil).
 Same stability contract, lookup and `:dry-run` semantics as the comment
 API.
 
+## Pullreq metadata API
+
+``` emacs-lisp
+(code-review-api-pullreq "owner/repo" 7)
+```
+
+Returns `nil` when the PR is not in the db, or a plist `(:id PULLREQ-ID
+:account ACCOUNT :head-oid HEAD-OID :url URL :state STATE)` describing
+the stored pullreq record.  `:account` uses the PR's registered GitHub
+account (`code-review-gh-pr-account`) or `code-review-gh-default-account`
+(nil when unset); `:head-oid` reads the pullreq `sha` slot or falls back
+to `headRefOid` in `raw-infos`.  Shares the same lookup and stability
+contract as the comment API.
+
 ## Send API
 
 `code-review-api-submit` publishes a review, replies, resolutions and

@@ -48,7 +48,8 @@
 ;;
 ;; The verdict functions (`code-review-api-verdict',
 ;; `code-review-api-set-verdict', `code-review-api-verdict-stale-p')
-;; are documented in the README and share this stability contract.
+;; and `code-review-api-pullreq' are documented in the README and share
+;; this stability contract.
 ;;
 ;; :dry-run: upsert and delete accept `:dry-run t' as trailing keyword
 ;; arguments.  They then write inside `closql-with-transaction',
@@ -63,6 +64,7 @@
 (require 'closql)
 (require 'uuidgen)
 (require 'code-review-db)
+(require 'code-review-auth)
 
 (define-error 'code-review-api-dry-run "Dry run, rolling back")
 
@@ -164,6 +166,23 @@ are not saved.  NUMBER may be an integer or a string."
   "Return the public comment plists of pullreq record PR."
   (seq-map (lambda (pair) (code-review-api--node-plist (car pair) (cdr pair)))
            (code-review-api--pairs (oref pr raw-comments))))
+
+;;;###autoload
+(defun code-review-api-pullreq (repo number)
+  "Return stored metadata for REPO (\"owner/name\") PR NUMBER, or nil.
+Return nil when the PR is not in the db.  Otherwise return a plist
+with keys :id (pullreq record UUID), :account (registered GitHub
+account or `code-review-gh-default-account', else nil), :head-oid
+\(PR head commit OID, or nil), :url (PR URL, or nil) and :state (PR
+state string, or nil)."
+  (when-let* ((pr (code-review-api--find-pullreq repo number)))
+    (list :id (oref pr id)
+          :account (or (code-review-gh-pr-account pr)
+                       code-review-gh-default-account)
+          :head-oid (or (oref pr sha)
+                        (a-get (oref pr raw-infos) 'headRefOid))
+          :url (and (slot-boundp pr 'url) (oref pr url))
+          :state (oref pr state))))
 
 ;;;###autoload
 (defun code-review-api-comments (repo number)

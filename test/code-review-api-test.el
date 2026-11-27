@@ -318,5 +318,54 @@ and a pre-existing v11 file (review slot nil) reads as no verdict."
           (code-review-section-insert-state)))
       (should-not (string-match-p "verdict" (buffer-string))))))
 
+;;; Pullreq metadata
+
+(ert-deftest code-review-api-test/pullreq-missing ()
+  (code-review-test--with-db
+    (should-not (code-review-api-pullreq "owner/repo" 7))
+    (should-error (code-review-api-pullreq "bad" 7) :type 'user-error)))
+
+(ert-deftest code-review-api-test/pullreq-metadata ()
+  (code-review-test--with-db
+    (let ((code-review-gh--pr-accounts (make-hash-table :test #'equal))
+          (code-review-gh-default-account nil))
+      (code-review-db--pullreq-create
+       (code-review-github-repo :owner "owner" :repo "repo" :number "7"))
+      (let ((pr (code-review-db-get-pullreq))
+            (meta (code-review-api-pullreq "owner/repo" 7)))
+        (should (equal (plist-get meta :id) (oref pr id)))
+        (should-not (plist-get meta :account))
+        (should-not (plist-get meta :head-oid))
+        (should-not (plist-get meta :url))
+        (should-not (plist-get meta :state)))
+      (code-review-db--pullreq-create
+       (code-review-github-repo
+        :owner "owner" :repo "repo" :number "7"
+        :url "https://github.com/owner/repo/pull/7"))
+      (let ((pr (code-review-db-get-pullreq)))
+        (oset pr saved t)
+        (code-review-db-update pr)
+        (code-review-db--pullreq-raw-infos-update
+         '((headRefOid . "deadbeef") (state . "OPEN") (reviews (nodes))))
+        (code-review-gh-register-pr-account pr "alice")
+        (let ((meta (code-review-api-pullreq "owner/repo" 7)))
+          (should (equal (plist-get meta :id) (oref pr id)))
+          (should (equal (plist-get meta :account) "alice"))
+          (should (equal (plist-get meta :head-oid) "deadbeef"))
+          (should (equal (plist-get meta :url) "https://github.com/owner/repo/pull/7"))
+          (should (equal (plist-get meta :state) "OPEN"))
+          (should (equal meta (code-review-api-pullreq "owner/repo" "7"))))
+        ;; falls back to default account when PR has no registered account
+        (let ((code-review-gh--pr-accounts (make-hash-table :test #'equal))
+              (code-review-gh-default-account "dflt"))
+          (should (equal (plist-get (code-review-api-pullreq "owner/repo" 7) :account)
+                         "dflt")))
+        ;; falls back to raw-infos headRefOid when sha slot is nil
+        (let ((fresh (code-review-db-get-pullreq)))
+          (oset fresh sha nil)
+          (code-review-db-update fresh))
+        (should (equal (plist-get (code-review-api-pullreq "owner/repo" 7) :head-oid)
+                       "deadbeef"))))))
+
 (provide 'code-review-api-test)
 ;;; code-review-api-test.el ends here
